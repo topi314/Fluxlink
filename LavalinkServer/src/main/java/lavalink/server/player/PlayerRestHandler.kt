@@ -8,9 +8,9 @@ import dev.arbjerg.lavalink.api.AudioPluginInfoModifier
 import dev.arbjerg.lavalink.protocol.v4.*
 import lavalink.server.config.ServerConfig
 import lavalink.server.io.SocketServer
+import lavalink.server.livekit.LiveKitConnectionInfo
 import lavalink.server.player.filters.FilterChain
 import lavalink.server.util.*
-import moe.kyokobot.koe.VoiceServerInfo
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -96,9 +96,8 @@ class PlayerRestHandler(
         }
 
         playerUpdate.voice.ifPresent {
-            // Discord sometimes sends a partial voice server update missing the endpoint, which can be ignored.
-            if (it.endpoint.isEmpty() || it.token.isEmpty() || it.sessionId.isEmpty()) {
-                throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Partial Lavalink voice state: $it")
+            if (it.endpoint.isEmpty() || it.token.isEmpty()) {
+                throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Partial voice state (missing endpoint or token): $it")
             }
         }
 
@@ -112,21 +111,20 @@ class PlayerRestHandler(
 
         playerUpdate.voice.ifPresent {
             synchronized(player) {
-                val oldConn = context.koe.getConnection(guildId)
-                if (oldConn == null ||
-                    oldConn.gatewayConnection?.isOpen == false ||
-                    oldConn.voiceServerInfo == null ||
-                    oldConn.voiceServerInfo?.endpoint != it.endpoint ||
-                    oldConn.voiceServerInfo?.token != it.token ||
-                    oldConn.voiceServerInfo?.sessionId != it.sessionId
-                ) {
-                    //clear old connection
-                    context.koe.destroyConnection(guildId)
+                val oldConn = context.liveKit.getConnection(guildId)
+                val connectionInfo = LiveKitConnectionInfo(it.endpoint, it.token)
 
-                    val conn = context.getMediaConnection(player)
-                    conn.connect(VoiceServerInfo(it.sessionId, it.endpoint, it.token)).exceptionally {
-                        throw ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to connect to voice server")
-                    }.toCompletableFuture().join()
+                if (oldConn == null ||
+                    !oldConn.isOpen ||
+                    oldConn.voiceInfo?.url != it.endpoint ||
+                    oldConn.voiceInfo?.token != it.token
+                ) {
+                    context.liveKit.destroyConnection(guildId)
+
+                    val conn = context.getVoiceConnection(player)
+                    conn.connect(connectionInfo).exceptionally { ex ->
+                        throw ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to connect to LiveKit room", ex)
+                    }.join()
                     player.provideTo(conn)
                 }
             }
@@ -213,7 +211,7 @@ class PlayerRestHandler(
                 }
 
                 player.play(newTrack)
-                player.provideTo(context.getMediaConnection(player))
+                player.provideTo(context.getVoiceConnection(player))
             } ?: player.stop()
         }
 

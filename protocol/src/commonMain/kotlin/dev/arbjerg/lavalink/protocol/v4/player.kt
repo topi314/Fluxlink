@@ -97,7 +97,6 @@ data class TrackInfo(
 data class VoiceState(
     val token: String,
     val endpoint: String,
-    val sessionId: String
 )
 
 @Serializable

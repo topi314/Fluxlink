@@ -21,26 +21,30 @@
  */
 package lavalink.server.player
 
-import com.sedmelluq.discord.lavaplayer.format.StandardAudioDataFormats
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayer
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager
 import com.sedmelluq.discord.lavaplayer.player.event.AudioEventAdapter
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack
 import com.sedmelluq.discord.lavaplayer.track.AudioTrackEndReason
-import com.sedmelluq.discord.lavaplayer.track.playback.AudioFrame
 import com.sedmelluq.discord.lavaplayer.track.playback.MutableAudioFrame
 import dev.arbjerg.lavalink.api.AudioPluginInfoModifier
 import dev.arbjerg.lavalink.api.IPlayer
-import io.netty.buffer.ByteBuf
 import lavalink.server.config.ServerConfig
 import lavalink.server.io.SocketContext
 import lavalink.server.io.SocketServer.Companion.sendPlayerUpdate
+import lavalink.server.livekit.LiveKitVoiceConnection
 import lavalink.server.player.filters.FilterChain
-import moe.kyokobot.koe.MediaConnection
-import moe.kyokobot.koe.media.OpusAudioFrameProvider
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+
+private const val SAMPLE_RATE = 48000
+private const val CHANNELS = 2
+private const val FRAME_SAMPLES = 480 // 10ms at 48kHz (webrtc-java recommended chunk size)
+private const val FRAME_SIZE_BYTES = FRAME_SAMPLES * CHANNELS * 2
+private const val FRAME_DURATION_MS = 10L
 
 class LavalinkPlayer(
     override val socketContext: SocketContext,
@@ -49,7 +53,12 @@ class LavalinkPlayer(
     audioPlayerManager: AudioPlayerManager,
     pluginInfoModifiers: List<AudioPluginInfoModifier>
 ) : AudioEventAdapter(), IPlayer {
-    private val buffer = ByteBuffer.allocate(StandardAudioDataFormats.DISCORD_OPUS.maximumChunkSize())
+
+	companion object {
+		private val log = org.slf4j.LoggerFactory.getLogger(LavalinkPlayer::class.java)
+	}
+
+    private val buffer = ByteBuffer.allocate(FRAME_SIZE_BYTES).order(ByteOrder.LITTLE_ENDIAN)
     private val mutableFrame = MutableAudioFrame().apply { setBuffer(buffer) }
 
     val audioLossCounter = AudioLossCounter()
@@ -67,6 +76,13 @@ class LavalinkPlayer(
     }
 
     private var updateFuture: ScheduledFuture<*>? = null
+    private var audioSendFuture: ScheduledFuture<*>? = null
+    @Volatile
+    private var voiceConnection: LiveKitVoiceConnection? = null
+
+    private val audioSendExecutor = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "lk-audio-$guildId").apply { isDaemon = true }
+    }
 
     override val isPlaying: Boolean
         get() = audioPlayer.playingTrack != null && !audioPlayer.isPaused
@@ -75,13 +91,17 @@ class LavalinkPlayer(
         get() = audioPlayer.playingTrack
 
     fun destroy() {
+        stopAudioSendLoop()
+        audioSendExecutor.shutdown()
         audioPlayer.destroy()
     }
 
-    fun provideTo(connection: MediaConnection) {
-        connection.audioSender = Provider(connection)
+    fun provideTo(connection: LiveKitVoiceConnection) {
+        log.info("Binding player for guild {} to voice connection (isOpen={}, track={})",
+            guildId, connection.isOpen, audioPlayer.playingTrack?.info?.title)
+        voiceConnection = connection
+        startAudioSendLoop()
     }
-
 
     override fun play(track: AudioTrack) {
         audioPlayer.playTrack(track)
@@ -106,8 +126,6 @@ class LavalinkPlayer(
     }
 
     override fun onTrackEnd(player: AudioPlayer, track: AudioTrack, endReason: AudioTrackEndReason) {
-        // 2025-07-31 changed from !! to ? due to possible race condition (or general condition) where
-        // updateFuture has not be initialised yet somehow.
         updateFuture?.cancel(false)
     }
 
@@ -124,16 +142,51 @@ class LavalinkPlayer(
         )
     }
 
-    private inner class Provider(connection: MediaConnection?) : OpusAudioFrameProvider(connection) {
-        override fun canProvide() = audioPlayer.provide(mutableFrame).also { provided ->
-            if (!provided) {
-                audioLossCounter.onLoss()
-            }
+    private fun startAudioSendLoop() {
+        stopAudioSendLoop()
+        audioSendFuture = audioSendExecutor.scheduleAtFixedRate(
+            ::sendAudioFrame,
+            0,
+            FRAME_DURATION_MS,
+            TimeUnit.MILLISECONDS
+        )
+    }
+
+    private fun stopAudioSendLoop() {
+        audioSendFuture?.cancel(false)
+        audioSendFuture = null
+    }
+
+    @Volatile
+    private var lastDiagLogMs = 0L
+
+    private fun sendAudioFrame() {
+        val conn = voiceConnection ?: return
+        if (!conn.isOpen) {
+            logDiag("Send loop: connection not open for guild $guildId")
+            return
         }
 
-        override fun retrieveOpusFrame(buf: ByteBuf) {
+        val provided = audioPlayer.provide(mutableFrame)
+        if (provided) {
             audioLossCounter.onSuccess()
-            buf.writeBytes(buffer.flip())
+            buffer.flip()
+            val data = ByteArray(buffer.remaining())
+            buffer.get(data)
+            buffer.clear()
+            conn.pushAudioFrame(data, SAMPLE_RATE, CHANNELS, FRAME_SAMPLES)
+	        logDiag("Sent audio frame (guild=$guildId, track=${audioPlayer.playingTrack?.info?.title}, paused=${audioPlayer.isPaused})")
+        } else {
+            audioLossCounter.onLoss()
+            logDiag("Send loop: no frame (guild=$guildId, track=${audioPlayer.playingTrack?.info?.title}, paused=${audioPlayer.isPaused})")
+        }
+    }
+
+    private fun logDiag(msg: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastDiagLogMs > 5000) {
+            lastDiagLogMs = now
+            log.info("{}", msg)
         }
     }
 }

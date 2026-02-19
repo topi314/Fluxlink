@@ -34,15 +34,13 @@ import io.undertow.websockets.core.WebSockets
 import io.undertow.websockets.jsr.UndertowSession
 import kotlinx.serialization.SerializationStrategy
 import lavalink.server.config.ServerConfig
+import lavalink.server.livekit.LiveKitClient
+import lavalink.server.livekit.LiveKitVoiceConnection
 import lavalink.server.player.LavalinkPlayer
-import moe.kyokobot.koe.KoeClient
-import moe.kyokobot.koe.KoeEventAdapter
-import moe.kyokobot.koe.MediaConnection
 import org.slf4j.LoggerFactory
 import org.springframework.web.socket.CloseStatus
 import org.springframework.web.socket.WebSocketSession
 import org.springframework.web.socket.adapter.standard.StandardWebSocketSession
-import java.net.InetSocketAddress
 import java.util.*
 import java.util.concurrent.*
 
@@ -55,7 +53,7 @@ class SocketContext(
     statsCollector: StatsCollector,
     override val userId: Long,
     override val clientName: String?,
-    val koe: KoeClient,
+    val liveKit: LiveKitClient,
     eventHandlers: Collection<PluginEventHandler>,
     private val pluginInfoModifiers: List<AudioPluginInfoModifier>,
 ) : ISocketContext {
@@ -113,14 +111,14 @@ class SocketContext(
     }
 
     /**
-     * Gets or creates a media connection
+     * Gets or creates a LiveKit voice connection for the given player's guild.
      */
-    fun getMediaConnection(player: LavalinkPlayer): MediaConnection {
+    fun getVoiceConnection(player: LavalinkPlayer): LiveKitVoiceConnection {
         val guildId = player.guildId
-        var conn = koe.getConnection(guildId)
+        var conn = liveKit.getConnection(guildId)
         if (conn == null) {
-            conn = koe.createConnection(guildId)
-            conn.registerListener(WsEventHandler(player))
+            conn = liveKit.createConnection(guildId)
+            conn.setEventListener(VoiceEventHandler(player))
         }
         return conn
     }
@@ -134,7 +132,7 @@ class SocketContext(
             eventEmitter.onDestroyPlayer(player)
             player.destroy()
         }
-        koe.destroyConnection(guildId)
+        liveKit.destroyConnection(guildId)
     }
 
     fun pause() {
@@ -200,7 +198,7 @@ class SocketContext(
         players.values.forEach {
             this.destroyPlayer(it.guildId)
         }
-        koe.close()
+        liveKit.close()
         eventEmitter.onSocketContextDestroyed()
     }
 
@@ -216,25 +214,24 @@ class SocketContext(
         session.close()
     }
 
-    private inner class WsEventHandler(private val player: LavalinkPlayer) : KoeEventAdapter() {
-        override fun gatewayClosed(code: Int, reason: String?, byRemote: Boolean) {
+    private inner class VoiceEventHandler(private val player: LavalinkPlayer) : LiveKitVoiceConnection.EventListener {
+        override fun onConnected() {
+            SocketServer.sendPlayerUpdate(this@SocketContext, player)
+        }
+
+        override fun onDisconnected(code: Int, reason: String) {
             val event = Message.EmittedEvent.WebSocketClosedEvent(
                 player.guildId.toString(),
                 code,
-                reason ?: "",
-                byRemote
+                reason,
+                true
             )
-
             sendMessage(Message.Serializer, event)
             SocketServer.sendPlayerUpdate(this@SocketContext, player)
         }
 
-        override fun gatewayReady(target: InetSocketAddress?, ssrc: Int) {
-            SocketServer.sendPlayerUpdate(this@SocketContext, player)
-        }
-
-        override fun gatewayError(cause: Throwable) {
-            log.error("Koe encountered a voice gateway exception for guild ${player.guildId}", cause)
+        override fun onError(cause: Throwable) {
+            log.error("LiveKit voice connection error for guild ${player.guildId}", cause)
         }
     }
 }
