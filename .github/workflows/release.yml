@@ -24,22 +24,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download Lavalink.jar
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: Lavalink.jar
-
-      - name: Download Lavalink-musl.jar
-        uses: actions/download-artifact@v4
-        with:
-          name: Lavalink-musl.jar
 
       - name: Upload Artifacts to GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: Lavalink.jar,Lavalink-musl.jar
+          artifacts: Lavalink.jar
           allowUpdates: true
           omitBodyDuringUpdate: true
           omitDraftDuringUpdate: true

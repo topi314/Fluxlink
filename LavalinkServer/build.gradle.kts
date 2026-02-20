@@ -119,33 +119,8 @@ tasks {
         useJUnitPlatform()
     }
 
-    val nativesJar = create<Jar>("lavaplayerNativesJar") {
-        // Only add musl natives
-        from(configurations.runtimeClasspath.get().find { it.name.contains("lavaplayer-natives") }?.let { file ->
-            zipTree(file).matching {
-                include {
-                    it.path.contains("musl")
-                }
-            }
-        })
-
-        archiveBaseName = "lavaplayer-natives"
-        archiveClassifier = "musl"
-    }
-
-
     withType<BootJar> {
         archiveFileName = "Lavalink.jar"
-
-        if (findProperty("targetPlatform") == "musl") {
-            archiveFileName = "Lavalink-musl.jar"
-            exclude {
-                it.name.contains("lavaplayer-natives-fork")
-            }
-
-            classpath(nativesJar.outputs)
-            dependsOn(nativesJar)
-        }
     }
 
     withType<BootRun> {
