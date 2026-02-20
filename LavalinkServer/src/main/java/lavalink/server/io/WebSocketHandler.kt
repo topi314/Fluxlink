@@ -15,6 +15,8 @@ import lavalink.server.player.filters.FilterChain
 import org.json.JSONObject
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.springframework.http.HttpStatus
+import org.springframework.web.server.ResponseStatusException
 
 class WebSocketHandler(
     private val context: SocketContext,
@@ -71,10 +73,21 @@ class WebSocketHandler(
         context.liveKit.destroyConnection(guildId)
 
         val player = context.getPlayer(guildId)
-        val conn = context.getVoiceConnection(player)
-        val connectionInfo = LiveKitConnectionInfo(endpoint, token)
-        conn.connect(connectionInfo).whenComplete { _, _ ->
-            player.provideTo(conn)
+        synchronized(player) {
+            val oldConn = context.liveKit.getConnection(guildId)
+            val connectionInfo = LiveKitConnectionInfo(endpoint, token)
+
+            if (oldConn == null ||
+                !oldConn.isOpen ||
+                oldConn.voiceInfo?.url != endpoint ||
+                oldConn.voiceInfo?.token != token
+            ) {
+                context.liveKit.destroyConnection(guildId)
+
+                val conn = context.getVoiceConnection(player)
+                conn.connect(connectionInfo).join()
+                player.provideTo(conn)
+            }
         }
     }
 

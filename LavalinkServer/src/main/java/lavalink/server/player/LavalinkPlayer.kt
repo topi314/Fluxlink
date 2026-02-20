@@ -43,9 +43,9 @@ import java.util.concurrent.TimeUnit
 
 private const val SAMPLE_RATE = 48000
 private const val CHANNELS = 2
-private const val FRAME_SAMPLES = 960 // 20ms at 48kHz
+private const val FRAME_SAMPLES = 480 // 10ms at 48kHz (webrtc-java recommended chunk size)
 private const val FRAME_SIZE_BYTES = FRAME_SAMPLES * CHANNELS * 2
-private const val FRAME_DURATION_MS = 20L
+private const val FRAME_DURATION_MS = 10L
 
 class LavalinkPlayer(
     val socket: SocketContext,
@@ -94,9 +94,7 @@ class LavalinkPlayer(
         log.info("Binding player for guild {} to voice connection (isOpen={}, track={})",
             guildId, connection.isOpen, audioPlayer.playingTrack?.info?.title)
         voiceConnection = connection
-        if (audioPlayer.playingTrack != null) {
-            startAudioSendLoop()
-        }
+        startAudioSendLoop()
     }
 
     override fun isPlaying(): Boolean = audioPlayer.playingTrack != null && !audioPlayer.isPaused
@@ -129,15 +127,10 @@ class LavalinkPlayer(
     }
 
     override fun onTrackEnd(player: AudioPlayer, track: AudioTrack, endReason: AudioTrackEndReason) {
-        stopAudioSendLoop()
         updateFuture?.cancel(false)
     }
 
     override fun onTrackStart(player: AudioPlayer, track: AudioTrack) {
-        if (voiceConnection != null) {
-            startAudioSendLoop()
-        }
-
         if (updateFuture?.isCancelled == false) {
             return
         }
@@ -165,9 +158,15 @@ class LavalinkPlayer(
         audioSendFuture = null
     }
 
+    @Volatile
+    private var lastDiagLogMs = 0L
+
     private fun sendAudioFrame() {
         val conn = voiceConnection ?: return
-        if (!conn.isOpen) return
+        if (!conn.isOpen) {
+            logDiag("Send loop: connection not open for guild $guildId")
+            return
+        }
 
         val provided = audioPlayer.provide(mutableFrame)
         if (provided) {
@@ -177,8 +176,18 @@ class LavalinkPlayer(
             buffer.get(data)
             buffer.clear()
             conn.pushAudioFrame(data, SAMPLE_RATE, CHANNELS, FRAME_SAMPLES)
+            logDiag("Sent audio frame (guild=$guildId, track=${audioPlayer.playingTrack?.info?.title}, paused=${audioPlayer.isPaused})")
         } else {
             audioLossCounter.onLoss()
+            logDiag("Send loop: no frame (guild=$guildId, track=${audioPlayer.playingTrack?.info?.title}, paused=${audioPlayer.isPaused})")
+        }
+    }
+
+    private fun logDiag(msg: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastDiagLogMs > 5000) {
+            lastDiagLogMs = now
+            log.info("{}", msg)
         }
     }
 }
