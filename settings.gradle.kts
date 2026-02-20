@@ -58,7 +58,7 @@ fun VersionCatalogBuilder.metrics() {
 }
 
 fun VersionCatalogBuilder.common() {
-    version("kotlin", "2.1.20")
+    version("kotlin", "2.3.0")
 
     library("kotlin-reflect", "org.jetbrains.kotlin", "kotlin-reflect").versionRef("kotlin")
     library("kotlin-stdlib-jdk8", "org.jetbrains.kotlin", "kotlin-stdlib-jdk8").versionRef("kotlin")
