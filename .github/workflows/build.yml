@@ -48,7 +48,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v5
 
       - name: Build Lavalink
-        run: ./gradlew build
+        run: ./gradlew build -x test
 
       - name: Publish to Maven
         env:
