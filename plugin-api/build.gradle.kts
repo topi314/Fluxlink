@@ -5,8 +5,6 @@ plugins {
     `maven-publish`
 }
 
-apply(from = "../repositories.gradle")
-
 val archivesBaseName = "plugin-api"
 group = "dev.arbjerg.lavalink"
 

@@ -54,6 +54,43 @@ subprojects {
         options.compilerArgs.add("-Xlint:unchecked")
         options.compilerArgs.add("-Xlint:deprecation")
     }
+
+    val isOssrhMissing = (findProperty("signing.gnupg.keyName") as String?).isNullOrBlank() || (findProperty("ossrhPassword") as String?).isNullOrBlank() || (findProperty("ossrhUsername") as String?).isNullOrBlank()
+    val isMavenMissing = (findProperty("MAVEN_USERNAME") as String?).isNullOrBlank() || (findProperty("MAVEN_PASSWORD") as String?).isNullOrBlank()
+
+    if (!isOssrhMissing) {
+        println("Publishing to OSSRH")
+        repositories {
+            val snapshots = "https://s01.oss.sonatype.org/content/repositories/snapshots/"
+            val releases = "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"
+
+            maven(if (version.toString().endsWith("SNAPSHOT")) snapshots else releases) {
+                credentials {
+                    password = findProperty("ossrhPassword") as String
+                    username = findProperty("ossrhUsername") as String
+                }
+            }
+        }
+    } else {
+        println("Not capable of publishing to OSSRH because of missing GPG key or OSSRH credentials")
+    }
+
+    if (!isMavenMissing) {
+        println("Publishing to Maven Repo")
+        repositories {
+            val snapshots = "https://maven.lavalink.dev/snapshots"
+            val releases = "https://maven.lavalink.dev/releases"
+
+            maven(if (version.toString().endsWith("SNAPSHOT")) snapshots else releases) {
+                credentials {
+                    password = findProperty("MAVEN_PASSWORD") as String
+                    username = findProperty("MAVEN_USERNAME") as String
+                }
+            }
+        }
+    } else {
+        println("Maven credentials not found, not publishing to Maven Repo")
+    }
 }
 
 @SuppressWarnings("GrMethodMayBeStatic")

@@ -1,6 +1,4 @@
 import org.apache.tools.ant.filters.ReplaceTokens
-import org.gradle.kotlin.dsl.assign
-import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import org.springframework.boot.gradle.tasks.bundling.BootJar
@@ -17,7 +15,6 @@ apply(plugin = "org.ajoberstar.grgit")
 apply(plugin = "com.adarshr.test-logger")
 apply(plugin = "kotlin")
 apply(plugin = "kotlin-spring")
-apply(from = "../repositories.gradle")
 
 val archivesBaseName = "Lavalink"
 group = "dev.arbjerg.lavalink"
@@ -34,9 +31,9 @@ java {
 }
 
 tasks.withType<KotlinJvmCompile> {
-	compilerOptions {
-		jvmTarget = JvmTarget.JVM_17
-	}
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
+    }
 }
 
 configurations {
@@ -59,7 +56,7 @@ dependencies {
     implementation(libs.livekit.server)
     listOf(null, "linux-x86_64", "linux-aarch32", "linux-aarch64", "macos-aarch64", "macos-x86_64", "windows-x86_64").forEach {
         implementation(libs.webrtc.java) {
-            artifact  {
+            artifact {
                 classifier = it
             }
         }
@@ -91,10 +88,10 @@ tasks {
 
     processResources {
         val tokens = mapOf(
-            "project.version"    to project.version,
-            "project.groupId"    to project.group,
+            "project.version" to project.version,
+            "project.groupId" to project.group,
             "project.artifactId" to "Lavalink-Server",
-            "env.BUILD_TIME"     to System.currentTimeMillis().toString()
+            "env.BUILD_TIME" to System.currentTimeMillis().toString()
         )
 
         filter(ReplaceTokens::class, mapOf("tokens" to tokens))
