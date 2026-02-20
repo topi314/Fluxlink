@@ -18,7 +18,7 @@ apply(from = "../repositories.gradle")
 val archivesBaseName = "Lavalink"
 group = "dev.arbjerg.lavalink"
 
-description = "Play audio to discord voice channels"
+description = "Play audio to LiveKit voice channels"
 
 application {
     mainClass.set("lavalink.server.Launcher")
@@ -46,16 +46,14 @@ dependencies {
         exclude(group = "org.springframework.boot", module = "spring-boot-starter-tomcat")
     }
 
-    implementation(libs.koe) {
-        // This version of SLF4J does not recognise Logback 1.2.3
-        exclude(group = "org.slf4j", module = "slf4j-api")
-    }
-    implementation(libs.koe.udpqueue) {
-        exclude(module = "lava-common")
-    }
-    implementation(libs.bundles.udpqueue.natives) {
-        exclude(group = "com.sedmelluq", module = "lava-common")
-    }
+    implementation(libs.livekit.server)
+    implementation(libs.webrtc.java)
+	runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.14.0:linux-x86_64")
+	runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.14.0:linux-aarch32")
+    runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.14.0:linux-aarch64")
+    runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.14.0:macos-aarch64")
+    runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.14.0:macos-x86_64")
+    runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.14.0:windows-x86_64")
 
     implementation(libs.lavaplayer)
     implementation(libs.lavaplayer.ip.rotator)
@@ -65,7 +63,6 @@ dependencies {
     implementation(libs.logback)
     implementation(libs.sentry.logback)
     implementation(libs.oshi) {
-        // This version of SLF4J does not recognise Logback 1.2.3
         exclude(group = "org.slf4j", module = "slf4j-api")
     }
     implementation(libs.json)
@@ -130,12 +127,10 @@ tasks {
 
         if (findProperty("targetPlatform") == "musl") {
             archiveFileName.set("Lavalink-musl.jar")
-            // Exclude base dependency jar
             exclude {
-                it.name.contains("lavaplayer-natives-fork") || (it.name.contains("udpqueue-native-") && !it.name.contains("musl"))
+                it.name.contains("lavaplayer-natives-fork")
             }
 
-            // Add custom jar
             classpath(nativesJar.outputs)
             dependsOn(nativesJar)
         }

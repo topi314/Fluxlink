@@ -2,6 +2,7 @@ package lavalink.server.config
 
 import com.sedmelluq.discord.lavaplayer.container.MediaContainerProbe
 import com.sedmelluq.discord.lavaplayer.container.MediaContainerRegistry
+import com.sedmelluq.discord.lavaplayer.format.Pcm16AudioDataFormat
 import com.sedmelluq.discord.lavaplayer.player.AudioConfiguration
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager
 import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager
@@ -50,6 +51,10 @@ class AudioPlayerConfiguration {
         mediaContainerProbes: Collection<MediaContainerProbe>
     ): AudioPlayerManager {
         val audioPlayerManager = DefaultAudioPlayerManager()
+
+        // PCM 16-bit signed little-endian output for WebRTC (LiveKit)
+        // 48kHz stereo, 960 samples per frame (20ms)
+        audioPlayerManager.configuration.outputFormat = Pcm16AudioDataFormat(2, 48000, 960, false)
 
         if (serverConfig.isGcWarnings) {
             audioPlayerManager.enableGcMonitoring()

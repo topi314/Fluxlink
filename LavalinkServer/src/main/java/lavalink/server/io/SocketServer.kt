@@ -30,9 +30,8 @@ import dev.arbjerg.lavalink.api.WebSocketExtension
 import dev.arbjerg.lavalink.protocol.v3.Message
 import dev.arbjerg.lavalink.protocol.v3.PlayerState
 import lavalink.server.config.ServerConfig
+import lavalink.server.livekit.LiveKitManager
 import lavalink.server.player.LavalinkPlayer
-import moe.kyokobot.koe.Koe
-import moe.kyokobot.koe.KoeOptions
 import org.json.JSONObject
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -46,7 +45,7 @@ import java.util.concurrent.ConcurrentHashMap
 class SocketServer(
     private val serverConfig: ServerConfig,
     val audioPlayerManager: AudioPlayerManager,
-    koeOptions: KoeOptions,
+    private val liveKitManager: LiveKitManager,
     private val eventHandlers: List<PluginEventHandler>,
     private val webSocketExtensions: List<WebSocketExtension>,
     private val filterExtensions: List<AudioFilterExtension>,
@@ -56,7 +55,6 @@ class SocketServer(
     // sessionID <-> Session
     val contextMap = ConcurrentHashMap<String, SocketContext>()
     private val resumableSessions = mutableMapOf<String, SocketContext>()
-    private val koe = Koe.koe(koeOptions)
     private val statsCollector = StatsCollector(this)
     private val charPool = ('a'..'z') + ('0'..'9')
 
@@ -66,14 +64,14 @@ class SocketServer(
         fun sendPlayerUpdate(socketContext: SocketContext, player: LavalinkPlayer) {
             if (socketContext.sessionPaused) return
 
-            val connection = socketContext.getMediaConnection(player).gatewayConnection
+            val connection = socketContext.getVoiceConnection(player)
             socketContext.sendMessage(
                 Message.PlayerUpdateEvent(
                     PlayerState(
                         System.currentTimeMillis(),
                         player.audioPlayer.playingTrack?.position ?: 0,
-                        connection?.isOpen == true,
-                        connection?.ping ?: -1L
+                        connection.isOpen,
+                        connection.ping
                     ),
                     player.guildId.toString()
                 )
@@ -123,7 +121,7 @@ class SocketServer(
             statsCollector,
             userId,
             clientName,
-            koe.newClient(userId.toLong()),
+            liveKitManager.newClient(userId.toLong()),
             eventHandlers,
             webSocketExtensions,
             filterExtensions,

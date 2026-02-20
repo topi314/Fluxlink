@@ -41,16 +41,8 @@ fun VersionCatalogBuilder.voice() {
     library("lavaplayer-ip-rotator", "dev.arbjerg", "lavaplayer-ext-youtube-rotator").versionRef("lavaplayer")
     library("lavadsp",               "dev.arbjerg", "lavadsp").version("0.7.8")
 
-    library("koe",          "moe.kyokobot.koe", "core").version("2.0.3-rc2")
-    library("koe-udpqueue", "moe.kyokobot.koe", "ext-udpqueue").version("2.0.3-rc2")
-
-    version("udpqueue", "0.2.7")
-    val platforms = listOf("linux-x86-64", "linux-x86", "linux-aarch64", "linux-arm", "linux-musl-x86-64", "linux-musl-aarch64", "win-x86-64", "win-x86", "darwin")
-    platforms.forEach {
-        library("udpqueue-native-$it", "club.minnced", "udpqueue-native-$it").versionRef("udpqueue")
-    }
-
-    bundle("udpqueue-natives", platforms.map { "udpqueue-native-$it" })
+    library("livekit-server", "io.livekit", "livekit-server").version("0.12.0")
+    library("webrtc-java", "dev.onvoid.webrtc", "webrtc-java").version("0.14.0")
 }
 
 fun VersionCatalogBuilder.metrics() {
