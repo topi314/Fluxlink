@@ -6,7 +6,6 @@ include(":plugin-api")
 
 project(":Lavalink-Server").projectDir = file("$rootDir/LavalinkServer")
 
-enableFeaturePreview("VERSION_CATALOGS")
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 dependencyResolutionManagement {
@@ -57,7 +56,7 @@ fun VersionCatalogBuilder.metrics() {
 }
 
 fun VersionCatalogBuilder.common() {
-    version("kotlin", "1.7.20")
+    version("kotlin", "2.3.0")
 
     library("kotlin-reflect",     "org.jetbrains.kotlin", "kotlin-reflect").versionRef("kotlin")
     library("kotlin-stdlib-jdk8", "org.jetbrains.kotlin", "kotlin-stdlib-jdk8").versionRef("kotlin")

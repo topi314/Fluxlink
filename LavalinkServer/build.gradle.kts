@@ -1,4 +1,8 @@
 import org.apache.tools.ant.filters.ReplaceTokens
+import org.gradle.kotlin.dsl.assign
+import org.gradle.kotlin.dsl.withType
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import org.springframework.boot.gradle.tasks.bundling.BootJar
 import org.springframework.boot.gradle.tasks.run.BootRun
 
@@ -25,8 +29,14 @@ application {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType<KotlinJvmCompile> {
+	compilerOptions {
+		jvmTarget = JvmTarget.JVM_17
+	}
 }
 
 configurations {
@@ -47,13 +57,13 @@ dependencies {
     }
 
     implementation(libs.livekit.server)
-    implementation(libs.webrtc.java)
-	runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.14.0:linux-x86_64")
-	runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.14.0:linux-aarch32")
-    runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.14.0:linux-aarch64")
-    runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.14.0:macos-aarch64")
-    runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.14.0:macos-x86_64")
-    runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.14.0:windows-x86_64")
+    listOf(null, "linux-x86_64", "linux-aarch32", "linux-aarch64", "macos-aarch64", "macos-x86_64", "windows-x86_64").forEach {
+        implementation(libs.webrtc.java) {
+            artifact  {
+                classifier = it
+            }
+        }
+    }
 
     implementation(libs.lavaplayer)
     implementation(libs.lavaplayer.ip.rotator)
@@ -90,7 +100,7 @@ tasks {
         filter(ReplaceTokens::class, mapOf("tokens" to tokens))
         copy {
             from("application.yml.example")
-            into("$buildDir/resources/main")
+            into("${getLayout().buildDirectory}/resources/main")
         }
     }
 
@@ -107,33 +117,8 @@ tasks {
         useJUnitPlatform()
     }
 
-    val nativesJar = create<Jar>("lavaplayerNativesJar") {
-        // Only add musl natives
-        from(configurations.runtimeClasspath.get().find { it.name.contains("lavaplayer-natives") }?.let { file ->
-            zipTree(file).matching {
-                include {
-                    it.path.contains("musl")
-                }
-            }
-        })
-
-        archiveBaseName.set("lavaplayer-natives")
-        archiveClassifier.set("musl")
-    }
-
-
     withType<BootJar> {
         archiveFileName.set("Lavalink.jar")
-
-        if (findProperty("targetPlatform") == "musl") {
-            archiveFileName.set("Lavalink-musl.jar")
-            exclude {
-                it.name.contains("lavaplayer-natives-fork")
-            }
-
-            classpath(nativesJar.outputs)
-            dependsOn(nativesJar)
-        }
     }
 
     withType<BootRun> {
