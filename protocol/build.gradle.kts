@@ -6,8 +6,6 @@ plugins {
     kotlin("jvm")
 }
 
-apply(from = "../repositories.gradle")
-
 val archivesBaseName = "protocol"
 group = "dev.arbjerg.lavalink"
 

@@ -2,6 +2,7 @@ package lavalink.server.config
 
 import com.sedmelluq.discord.lavaplayer.container.MediaContainerProbe
 import com.sedmelluq.discord.lavaplayer.container.MediaContainerRegistry
+import com.sedmelluq.discord.lavaplayer.format.Pcm16AudioDataFormat
 import com.sedmelluq.discord.lavaplayer.player.AudioConfiguration
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager
 import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager
@@ -51,6 +52,7 @@ class AudioPlayerConfiguration {
     ): AudioPlayerManager {
         val audioPlayerManager = DefaultAudioPlayerManager()
 
+        audioPlayerManager.configuration.outputFormat = Pcm16AudioDataFormat(2, 48000, 480, false)
         if (serverConfig.isGcWarnings) {
             audioPlayerManager.enableGcMonitoring()
         }

@@ -7,14 +7,16 @@ import dev.arbjerg.lavalink.api.WebSocketExtension
 import dev.arbjerg.lavalink.protocol.v3.Filters
 import dev.arbjerg.lavalink.protocol.v3.decodeTrack
 import lavalink.server.config.ServerConfig
+import lavalink.server.livekit.LiveKitConnectionInfo
 import lavalink.server.player.TrackEndMarkerHandler
 import lavalink.server.player.filters.Band
 import lavalink.server.player.filters.EqualizerConfig
 import lavalink.server.player.filters.FilterChain
-import moe.kyokobot.koe.VoiceServerInfo
 import org.json.JSONObject
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.springframework.http.HttpStatus
+import org.springframework.web.server.ResponseStatusException
 
 class WebSocketHandler(
     private val context: SocketContext,
@@ -60,22 +62,32 @@ class WebSocketHandler(
     }
 
     private fun voiceUpdate(json: JSONObject) {
-        val sessionId = json.getString("sessionId")
         val guildId = json.getLong("guildId")
 
         val event = json.getJSONObject("event")
         val endpoint: String? = event.optString("endpoint")
         val token: String = event.getString("token")
 
-        //discord sometimes send a partial server update missing the endpoint, which can be ignored.
         endpoint ?: return
-        //clear old connection
-        context.koe.destroyConnection(guildId)
+
+        context.liveKit.destroyConnection(guildId)
 
         val player = context.getPlayer(guildId)
-        val conn = context.getMediaConnection(player)
-        conn.connect(VoiceServerInfo(sessionId, endpoint, token)).whenComplete { _, _ ->
-            player.provideTo(conn)
+        synchronized(player) {
+            val oldConn = context.liveKit.getConnection(guildId)
+            val connectionInfo = LiveKitConnectionInfo(endpoint, token)
+
+            if (oldConn == null ||
+                !oldConn.isOpen ||
+                oldConn.voiceInfo?.url != endpoint ||
+                oldConn.voiceInfo?.token != token
+            ) {
+                context.liveKit.destroyConnection(guildId)
+
+                val conn = context.getVoiceConnection(player)
+                conn.connect(connectionInfo).join()
+                player.provideTo(conn)
+            }
         }
     }
 
@@ -110,7 +122,7 @@ class WebSocketHandler(
 
         player.play(track)
 
-        val conn = context.getMediaConnection(player)
+        val conn = context.getVoiceConnection(player)
         context.getPlayer(json.getLong("guildId")).provideTo(conn)
     }
 

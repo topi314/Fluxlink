@@ -1,4 +1,6 @@
 import org.apache.tools.ant.filters.ReplaceTokens
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import org.springframework.boot.gradle.tasks.bundling.BootJar
 import org.springframework.boot.gradle.tasks.run.BootRun
 
@@ -13,20 +15,25 @@ apply(plugin = "org.ajoberstar.grgit")
 apply(plugin = "com.adarshr.test-logger")
 apply(plugin = "kotlin")
 apply(plugin = "kotlin-spring")
-apply(from = "../repositories.gradle")
 
 val archivesBaseName = "Lavalink"
 group = "dev.arbjerg.lavalink"
 
-description = "Play audio to discord voice channels"
+description = "Play audio to LiveKit voice channels"
 
 application {
     mainClass.set("lavalink.server.Launcher")
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType<KotlinJvmCompile> {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
+    }
 }
 
 configurations {
@@ -46,15 +53,13 @@ dependencies {
         exclude(group = "org.springframework.boot", module = "spring-boot-starter-tomcat")
     }
 
-    implementation(libs.koe) {
-        // This version of SLF4J does not recognise Logback 1.2.3
-        exclude(group = "org.slf4j", module = "slf4j-api")
-    }
-    implementation(libs.koe.udpqueue) {
-        exclude(module = "lava-common")
-    }
-    implementation(libs.bundles.udpqueue.natives) {
-        exclude(group = "com.sedmelluq", module = "lava-common")
+    implementation(libs.livekit.server)
+    listOf(null, "linux-x86_64", "linux-aarch32", "linux-aarch64", "macos-aarch64", "macos-x86_64", "windows-x86_64").forEach {
+        implementation(libs.webrtc.java) {
+            artifact {
+                classifier = it
+            }
+        }
     }
 
     implementation(libs.lavaplayer)
@@ -65,7 +70,6 @@ dependencies {
     implementation(libs.logback)
     implementation(libs.sentry.logback)
     implementation(libs.oshi) {
-        // This version of SLF4J does not recognise Logback 1.2.3
         exclude(group = "org.slf4j", module = "slf4j-api")
     }
     implementation(libs.json)
@@ -84,10 +88,10 @@ tasks {
 
     processResources {
         val tokens = mapOf(
-            "project.version"    to project.version,
-            "project.groupId"    to project.group,
+            "project.version" to project.version,
+            "project.groupId" to project.group,
             "project.artifactId" to "Lavalink-Server",
-            "env.BUILD_TIME"     to System.currentTimeMillis().toString()
+            "env.BUILD_TIME" to System.currentTimeMillis().toString()
         )
 
         filter(ReplaceTokens::class, mapOf("tokens" to tokens))
@@ -110,35 +114,8 @@ tasks {
         useJUnitPlatform()
     }
 
-    val nativesJar = create<Jar>("lavaplayerNativesJar") {
-        // Only add musl natives
-        from(configurations.runtimeClasspath.get().find { it.name.contains("lavaplayer-natives") }?.let { file ->
-            zipTree(file).matching {
-                include {
-                    it.path.contains("musl")
-                }
-            }
-        })
-
-        archiveBaseName.set("lavaplayer-natives")
-        archiveClassifier.set("musl")
-    }
-
-
     withType<BootJar> {
         archiveFileName.set("Lavalink.jar")
-
-        if (findProperty("targetPlatform") == "musl") {
-            archiveFileName.set("Lavalink-musl.jar")
-            // Exclude base dependency jar
-            exclude {
-                it.name.contains("lavaplayer-natives-fork") || (it.name.contains("udpqueue-native-") && !it.name.contains("musl"))
-            }
-
-            // Add custom jar
-            classpath(nativesJar.outputs)
-            dependsOn(nativesJar)
-        }
     }
 
     withType<BootRun> {

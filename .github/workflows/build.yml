@@ -31,59 +31,37 @@ jobs:
       MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: Setup Java
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v5
         with:
           distribution: zulu
-          java-version: 13
+          java-version: 17
           cache: gradle
 
       - name: Setup Gradle
-        uses: gradle/gradle-build-action@v2
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Execute Gradle build
-        run: ./gradlew build
-
-      - name: Execute Gradle build
-        run: ./gradlew build -PtargetPlatform=musl
+        run: ./gradlew build -x test
 
       - name: Publish to Maven
         run: ./gradlew publish -PMAVEN_USERNAME=$MAVEN_USERNAME -PMAVEN_PASSWORD=$MAVEN_PASSWORD
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v6
         with:
           name: Lavalink.jar
-          path: |
-            LavalinkServer/build/libs/Lavalink.jar
-            LavalinkServer/build/libs/Lavalink-musl.jar
+          path: LavalinkServer/build/libs/Lavalink.jar
 
       - name: Docker Meta
         id: meta
-        uses: docker/metadata-action@v4
+        uses: docker/metadata-action@v5
         with:
           images: |
             ghcr.io/${{ github.repository }}
             ${{ env.DOCKER_IMAGE }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix=
-
-      - name: Docker Meta Alpine
-        id: meta-alpine
-        uses: docker/metadata-action@v4
-        with:
-          images: |
-            ghcr.io/${{ github.repository }}
-            ${{ env.DOCKER_IMAGE }}
-          flavor: |
-            suffix=-alpine,onlatest=true
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -93,13 +71,13 @@ jobs:
             type=sha,prefix=
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -107,14 +85,14 @@ jobs:
 
       - name: Log in to docker registry
         if: env.DOCKER_USERNAME && env.DOCKER_TOKEN && env.DOCKER_REGISTRY && env.DOCKER_IMAGE
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.DOCKER_REGISTRY }}
           username: ${{ env.DOCKER_USERNAME }}
           password: ${{ env.DOCKER_TOKEN }}
 
       - name: Build Ubuntu and Push
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           file: LavalinkServer/docker/Dockerfile
           context: .
@@ -122,13 +100,3 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-      - name: Build Alpine and Push
-        uses: docker/build-push-action@v3
-        with:
-          file: LavalinkServer/docker/alpine.Dockerfile
-          context: .
-          platforms: linux/amd64,linux/arm64/v8
-          push: true
-          tags: ${{ steps.meta-alpine.outputs.tags }}
-          labels: ${{ steps.meta-alpine.outputs.labels }}

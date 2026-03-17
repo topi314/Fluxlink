@@ -1,5 +1,6 @@
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.ajoberstar.grgit.Grgit
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 
 buildscript {
     repositories {
@@ -12,11 +13,11 @@ buildscript {
 
     dependencies {
         classpath("gradle.plugin.com.gorylenko.gradle-git-properties:gradle-git-properties:1.5.2")
-        classpath("org.springframework.boot:spring-boot-gradle-plugin:2.6.6")
+        classpath("org.springframework.boot:spring-boot-gradle-plugin:4.0.3")
         classpath("org.sonarsource.scanner.gradle:sonarqube-gradle-plugin:2.6.2")
-        classpath("com.adarshr:gradle-test-logger-plugin:1.6.0")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.7.20")
-        classpath("org.jetbrains.kotlin:kotlin-allopen:1.7.20")
+        classpath("com.adarshr:gradle-test-logger-plugin:4.0.0")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.0")
+        classpath("org.jetbrains.kotlin:kotlin-allopen:2.3.0")
     }
 }
 
@@ -29,7 +30,6 @@ allprojects {
         mavenLocal()   // useful for developing
         maven("https://m2.dv8tion.net/releases")
         maven("https://maven.lavalink.dev/releases")
-        jcenter()
         maven("https://jitpack.io") // build projects directly from GitHub
     }
 }
@@ -43,14 +43,53 @@ subprojects {
         apply(from = "../analysis.gradle")
     }
 
-    tasks.withType<KotlinCompile> {
-        kotlinOptions.jvmTarget = "11"
+    tasks.withType<KotlinJvmCompile> {
+	    compilerOptions {
+			jvmTarget = JvmTarget.JVM_11
+	    }
     }
 
     tasks.withType<JavaCompile> {
         options.encoding = "UTF-8"
         options.compilerArgs.add("-Xlint:unchecked")
         options.compilerArgs.add("-Xlint:deprecation")
+    }
+
+    val isOssrhMissing = (findProperty("signing.gnupg.keyName") as String?).isNullOrBlank() || (findProperty("ossrhPassword") as String?).isNullOrBlank() || (findProperty("ossrhUsername") as String?).isNullOrBlank()
+    val isMavenMissing = (findProperty("MAVEN_USERNAME") as String?).isNullOrBlank() || (findProperty("MAVEN_PASSWORD") as String?).isNullOrBlank()
+
+    if (!isOssrhMissing) {
+        println("Publishing to OSSRH")
+        repositories {
+            val snapshots = "https://s01.oss.sonatype.org/content/repositories/snapshots/"
+            val releases = "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"
+
+            maven(if (version.toString().endsWith("SNAPSHOT")) snapshots else releases) {
+                credentials {
+                    password = findProperty("ossrhPassword") as String
+                    username = findProperty("ossrhUsername") as String
+                }
+            }
+        }
+    } else {
+        println("Not capable of publishing to OSSRH because of missing GPG key or OSSRH credentials")
+    }
+
+    if (!isMavenMissing) {
+        println("Publishing to Maven Repo")
+        repositories {
+            val snapshots = "https://maven.lavalink.dev/snapshots"
+            val releases = "https://maven.lavalink.dev/releases"
+
+            maven(if (version.toString().endsWith("SNAPSHOT")) snapshots else releases) {
+                credentials {
+                    password = findProperty("MAVEN_PASSWORD") as String
+                    username = findProperty("MAVEN_USERNAME") as String
+                }
+            }
+        }
+    } else {
+        println("Maven credentials not found, not publishing to Maven Repo")
     }
 }
 
