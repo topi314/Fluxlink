@@ -13,6 +13,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicLong
  * - WebSocket signaling via [LiveKitSignalClient]
  * - Publisher and subscriber WebRTC PeerConnections
  * - Audio track publishing via [CustomAudioSource]
+ * - Automatic reconnection on unexpected disconnections
  */
 class LiveKitVoiceConnection(
     private val httpClient: OkHttpClient,
@@ -31,6 +33,9 @@ class LiveKitVoiceConnection(
         private const val AUDIO_TRACK_ID = "lavalink-audio"
         private const val STREAM_ID = "lavalink-stream"
         private const val PING_INTERVAL_SECONDS = 10L
+        private const val MAX_RECONNECT_ATTEMPTS = 5
+        private const val RECONNECT_BASE_DELAY_MS = 1000L
+        private const val RECONNECT_MAX_DELAY_MS = 30000L
     }
 
     interface EventListener {
@@ -48,10 +53,15 @@ class LiveKitVoiceConnection(
     private var connectionInfo: LiveKitConnectionInfo? = null
     private var pingFuture: ScheduledFuture<*>? = null
     private var statsFuture: ScheduledFuture<*>? = null
+    private var reconnectFuture: ScheduledFuture<*>? = null
     private val sinkFrameCount = AtomicLong(0)
+    private val reconnectAttempts = AtomicInteger(0)
+
+    @Volatile
+    private var intentionallyClosed = false
 
     private val scheduler = Executors.newSingleThreadScheduledExecutor { r ->
-        Thread(r, "livekit-voice-ping").apply { isDaemon = true }
+        Thread(r, "livekit-voice-sched").apply { isDaemon = true }
     }
 
     @Volatile
@@ -77,7 +87,12 @@ class LiveKitVoiceConnection(
      */
     fun connect(info: LiveKitConnectionInfo): CompletableFuture<Void> {
         connectionInfo = info
+        intentionallyClosed = false
+        reconnectAttempts.set(0)
+        return doConnect(info)
+    }
 
+    private fun doConnect(info: LiveKitConnectionInfo): CompletableFuture<Void> {
         val signal = LiveKitSignalClient(httpClient)
         signalClient = signal
 
@@ -89,6 +104,7 @@ class LiveKitVoiceConnection(
                     setupPeerConnections(response)
                     requestTrackPublication()
                     isOpen = true
+                    reconnectAttempts.set(0)
                     startPingLoop()
                     eventListener?.onConnected()
                     result.complete(null)
@@ -117,11 +133,21 @@ class LiveKitVoiceConnection(
 
             override fun onClose(code: Int, reason: String) {
                 isOpen = false
+                if (!intentionallyClosed) {
+                    log.warn("LiveKit signaling closed unexpectedly (code={}, reason={}), scheduling reconnect", code, reason)
+                    scheduleReconnect()
+                }
                 eventListener?.onDisconnected(code, reason)
             }
 
             override fun onError(error: Throwable) {
-                eventListener?.onError(error)
+                isOpen = false
+                if (!intentionallyClosed) {
+                    log.warn("LiveKit signaling error, scheduling reconnect", error)
+                    scheduleReconnect()
+                } else {
+                    eventListener?.onError(error)
+                }
             }
         }).exceptionally { t ->
             result.completeExceptionally(t)
@@ -129,6 +155,62 @@ class LiveKitVoiceConnection(
         }
 
         return result
+    }
+
+    private fun scheduleReconnect() {
+        val info = connectionInfo ?: return
+        if (intentionallyClosed) return
+
+        val attempt = reconnectAttempts.incrementAndGet()
+        if (attempt > MAX_RECONNECT_ATTEMPTS) {
+            log.error("Exhausted {} reconnect attempts, giving up", MAX_RECONNECT_ATTEMPTS)
+            eventListener?.onError(RuntimeException("Failed to reconnect after $MAX_RECONNECT_ATTEMPTS attempts"))
+            return
+        }
+
+        val delay = (RECONNECT_BASE_DELAY_MS * (1L shl (attempt - 1).coerceAtMost(5)))
+            .coerceAtMost(RECONNECT_MAX_DELAY_MS)
+        log.info("Reconnect attempt {}/{} in {}ms", attempt, MAX_RECONNECT_ATTEMPTS, delay)
+
+        reconnectFuture = scheduler.schedule({
+            if (intentionallyClosed) return@schedule
+            teardownTransport()
+            try {
+                doConnect(info).exceptionally { t ->
+                    log.warn("Reconnect attempt {} failed", attempt, t)
+                    scheduleReconnect()
+                    null
+                }
+            } catch (e: Exception) {
+                log.warn("Reconnect attempt {} threw", attempt, e)
+                scheduleReconnect()
+            }
+        }, delay, TimeUnit.MILLISECONDS)
+    }
+
+    private fun teardownTransport() {
+        pingFuture?.cancel(false)
+        pingFuture = null
+        statsFuture?.cancel(false)
+        statsFuture = null
+
+        signalClient?.close()
+        signalClient = null
+
+        // PeerConnections must be closed before disposing the AudioTrack,
+        // otherwise the transceiver still holds a native reference to it.
+        publisherPc?.close()
+        publisherPc = null
+        subscriberPc?.close()
+        subscriberPc = null
+
+        audioTrack?.dispose()
+        audioTrack = null
+        audioSource?.dispose()
+        audioSource = null
+
+        firstFramePushed = false
+        sinkFrameCount.set(0)
     }
 
     /**
@@ -149,32 +231,19 @@ class LiveKitVoiceConnection(
                 if (sample != 0.toShort()) nonZeroCount++
                 if (kotlin.math.abs(sample.toInt()) > kotlin.math.abs(maxSample.toInt())) maxSample = sample
             }
-            log.info("First audio frame: size={}, sampleRate={}, channels={}, frameCount={}, nonZeroSamples={}/{}, peakSample={}", 
+            log.info("First audio frame: size={}, sampleRate={}, channels={}, frameCount={}, nonZeroSamples={}/{}, peakSample={}",
                 data.size, sampleRate, channels, frameCount, nonZeroCount, data.size / 2, maxSample)
         }
         audioSource?.pushAudio(data, 16, sampleRate, channels, frameCount)
     }
 
     fun close() {
+        intentionallyClosed = true
         isOpen = false
-        pingFuture?.cancel(false)
-        statsFuture?.cancel(false)
-
-        audioTrack?.dispose()
-        audioTrack = null
-
-        audioSource?.dispose()
-        audioSource = null
-
-        publisherPc?.close()
-        publisherPc = null
-
-        subscriberPc?.close()
-        subscriberPc = null
-
-        signalClient?.close()
-        signalClient = null
-
+        reconnectFuture?.cancel(false)
+        reconnectFuture = null
+        teardownTransport()
+        scheduler.shutdown()
         connectionInfo = null
     }
 
@@ -200,7 +269,7 @@ class LiveKitVoiceConnection(
             it.addSink(AudioTrackSink { _, bitsPerSample, sampleRate, channels, frames ->
                 val count = sinkFrameCount.incrementAndGet()
                 if (count == 1L) {
-                    log.info("AudioTrackSink: first frame received from track pipeline ({}bit, {}Hz, {}ch, {} frames)", 
+                    log.info("AudioTrackSink: first frame received from track pipeline ({}bit, {}Hz, {}ch, {} frames)",
                         bitsPerSample, sampleRate, channels, frames)
                 }
             })
@@ -234,7 +303,7 @@ class LiveKitVoiceConnection(
 
         pc.createOffer(options, object : CreateSessionDescriptionObserver {
             override fun onSuccess(description: RTCSessionDescription) {
-                log.info("Publisher SDP offer (audio lines):\n{}", 
+                log.info("Publisher SDP offer (audio lines):\n{}",
                     description.sdp.lines().filter { it.startsWith("m=audio") || it.startsWith("a=rtpmap:") || it.startsWith("a=fmtp:") }.joinToString("\n"))
                 pc.setLocalDescription(description, object : SetSessionDescriptionObserver {
                     override fun onSuccess() {
@@ -355,7 +424,7 @@ class LiveKitVoiceConnection(
                                 val attrs = stats.attributes
                                 log.info("OUTBOUND_RTP: kind={}, codec={}, packetsSent={}, bytesSent={}, " +
                                     "retransmittedPacketsSent={}, sinkFrames={}",
-                                    attrs["kind"], attrs["codecId"], attrs["packetsSent"], 
+                                    attrs["kind"], attrs["codecId"], attrs["packetsSent"],
                                     attrs["bytesSent"], attrs["retransmittedPacketsSent"],
                                     sinkFrameCount.get())
                             }
