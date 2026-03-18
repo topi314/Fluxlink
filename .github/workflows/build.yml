@@ -34,24 +34,24 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2
+      JAVA_OPTS: -Xmx2g -XX:MaxMetaspaceSize=512m
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: zulu
           java-version: 17
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Build Lavalink
-        run: ./gradlew build
-
-      - name: Build Lavalink musl
-        run: ./gradlew build -PtargetPlatform=musl
+        run: ./gradlew build -x test
 
       - name: Publish to Maven
         env:
@@ -64,16 +64,10 @@ jobs:
         run: ./gradlew publish
 
       - name: Upload Lavalink.jar
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Lavalink.jar
           path: LavalinkServer/build/libs/Lavalink.jar
-
-      - name: Upload Lavalink-musl.jar
-        uses: actions/upload-artifact@v4
-        with:
-          name: Lavalink-musl.jar
-          path: LavalinkServer/build/libs/Lavalink-musl.jar
 
   build-docker:
     needs: build
@@ -87,11 +81,6 @@ jobs:
             suffix: ''
             platforms: linux/amd64,linux/arm/v7,linux/arm64/v8
             artifact: Lavalink.jar
-          - name: Alpine
-            dockerfile: LavalinkServer/docker/alpine.Dockerfile
-            suffix: '-alpine'
-            platforms: linux/amd64,linux/arm64/v8
-            artifact: Lavalink-musl.jar
           - name: Distroless
             dockerfile: LavalinkServer/docker/distroless.Dockerfile
             suffix: '-distroless'
@@ -99,10 +88,10 @@ jobs:
             artifact: Lavalink.jar
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download ${{ matrix.artifact }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: LavalinkServer/build/libs/

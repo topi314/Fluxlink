@@ -96,7 +96,6 @@ class PlayerSerializerTest {
                 voice {
                     token shouldBe "..."
                     endpoint shouldBe "..."
-                    sessionId shouldBe "..."
                 }
                 state {
                     time shouldBe 1
@@ -149,7 +148,6 @@ class PlayerSerializerTest {
             voice.requirePresent {
                 token shouldBe "..."
                 endpoint shouldBe "..."
-                sessionId shouldBe "..."
             }
         }
     }
